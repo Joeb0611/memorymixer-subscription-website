@@ -13,13 +13,24 @@ export const handler = async (event: any) => {
   }
 
   try {
-    const { priceId, userId, planName } = JSON.parse(event.body)
+    const { priceId, userId, planName, eventId, mode } = JSON.parse(event.body)
 
     if (!priceId || !userId || !planName) {
       return {
         statusCode: 400,
         body: JSON.stringify({ error: 'Missing required parameters' }),
       }
+    }
+
+    const checkoutMode = mode || 'subscription' // Default to subscription
+    const metadata: any = {
+      userId,
+      planName,
+    }
+
+    // Add eventId for event packages
+    if (eventId) {
+      metadata.eventId = eventId
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -30,13 +41,10 @@ export const handler = async (event: any) => {
           quantity: 1,
         },
       ],
-      mode: 'subscription',
+      mode: checkoutMode,
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/subscribe?userId=${userId}`,
-      metadata: {
-        userId,
-        planName,
-      },
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/subscribe?userId=${userId}${eventId ? `&eventId=${eventId}` : ''}`,
+      metadata,
     })
 
     return {

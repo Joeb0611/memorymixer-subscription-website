@@ -39,7 +39,11 @@ export const handler = async (event: any) => {
   switch (stripeEvent.type) {
     case 'checkout.session.completed':
       const session = stripeEvent.data.object as Stripe.Checkout.Session
-      await handleSuccessfulPayment(session)
+      if (session.mode === 'subscription') {
+        await handleSuccessfulSubscription(session)
+      } else if (session.mode === 'payment') {
+        await handleSuccessfulEventPurchase(session)
+      }
       break
 
     case 'customer.subscription.updated':
@@ -68,7 +72,7 @@ export const handler = async (event: any) => {
   }
 }
 
-async function handleSuccessfulPayment(session: Stripe.Checkout.Session) {
+async function handleSuccessfulSubscription(session: Stripe.Checkout.Session) {
   const userId = session.metadata?.userId
   const planName = session.metadata?.planName
 
@@ -93,6 +97,53 @@ async function handleSuccessfulPayment(session: Stripe.Checkout.Session) {
     console.error('Error updating subscription:', error)
   } else {
     console.log(`Subscription activated for user ${userId}`)
+  }
+}
+
+async function handleSuccessfulEventPurchase(session: Stripe.Checkout.Session) {
+  const userId = session.metadata?.userId
+  const planName = session.metadata?.planName
+  const eventId = session.metadata?.eventId
+
+  if (!userId || !planName) {
+    console.error('Missing metadata in session:', session.id)
+    return
+  }
+
+  // Record the event package purchase
+  const { error: purchaseError } = await supabase
+    .from('event_purchases')
+    .insert({
+      user_id: userId,
+      event_id: eventId,
+      package_type: planName,
+      stripe_payment_intent_id: session.payment_intent,
+      amount: session.amount_total,
+      currency: session.currency,
+      purchased_at: new Date().toISOString(),
+    })
+
+  if (purchaseError) {
+    console.error('Error recording event purchase:', purchaseError)
+  } else {
+    console.log(`Event package purchased for user ${userId}, event ${eventId}`)
+  }
+
+  // If event exists, update it to enable QR code
+  if (eventId) {
+    const { error: eventError } = await supabase
+      .from('events')
+      .update({
+        has_qr_code: true,
+        qr_code_enabled: true,
+      })
+      .eq('id', eventId)
+
+    if (eventError) {
+      console.error('Error updating event QR code status:', eventError)
+    } else {
+      console.log(`QR code enabled for event ${eventId}`)
+    }
   }
 }
 
